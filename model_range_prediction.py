@@ -27,4 +27,29 @@ def prepare_data(symbol, start_date, end_date, dte):
 
     return features, target
 
-def train_regression_model(fea
+def train_regression_model(features_train, target_train):
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(features_train, target_train)
+    return model
+
+def evaluate_regression_model(model, features_test, target_test):
+    predictions = model.predict(features_test)
+    mse = mean_squared_error(target_test, predictions)
+    rmse = np.sqrt(mse)
+    print('Mean Squared Error: ', mse)
+    print('Root Mean Squared Error: ', rmse)
+
+def predict_std_in_days(symbol, start_date, end_date, dte):
+    features, target = prepare_data(symbol, start_date, end_date, dte)
+    features_train, features_test, target_train, target_test = train_test_split(features, target, test_size=0.2, random_state=42)
+    model = train_regression_model(features_train, target_train)
+    evaluate_regression_model(model, features_test, target_test)
+    
+    # Use the last instance in features_test to represent the point dte days ahead
+    prediction = model.predict(features_test[-1:])
+    print("Prediction:", prediction[0])  # Access the first element of the prediction array
+
+    return prediction[0]
+
+
+

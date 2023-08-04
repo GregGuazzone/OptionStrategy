@@ -4,3 +4,5 @@ yfinance
 yoptions
 scipy
 matplotlib
+scikit-learn
+ta
