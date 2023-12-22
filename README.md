@@ -40,28 +40,38 @@ pip install -r requirements.txt
 #### Usage Examples
 
 ##### Get the Option Chain For a Specific Date
-To get the available expiration dates for a specific stock, use the --exp_dates option:
+To get all available expiration dates for a specific stock, use the --exp_dates option:
 
 ```bash
-python3 expected_profit.py <date> <ticker>
+python3 expected_profit.py <ticker> --exp_dates
 ```
-Example:
+
+To get the option chain for a specific date:
 ```bash
-python3 expected_profit.py 2023-08-11 AAPL
+python3 expected_profit.py <ticker> <date> 
 ```
 
 ##### Adding an option to the strategy
 ```bash
-<+(buy), -(sell)> <c(call), p(put)> <strike>
+< +(buy) | -(sell)> <c(call) | p(put)> <strike>
 ```
 Example:
 ```bash
-- c 100
+-c 100
+```
+
+```bash
+-p 145
 ```
 
 ##### Charting the strategy
 ```bash
-q
+plot
+```
+
+##### Restarts the strategy
+```bash
+reset
 ```
 
 ## Planned features
