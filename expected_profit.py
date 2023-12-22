@@ -11,10 +11,11 @@ from model_range_prediction import predict_std_in_days as fstd
 
 class Strategy:
     def __init__(self, date, ticker, depth=1):
+        risk_free_rate = yf.Ticker('^TNX').info['regularMarketOpen'] / 100
         self.dte = (datetime.strptime(date, '%Y-%m-%d') - datetime.today()).days + 1
         self.ticker = ticker
-        self.calls = pd.DataFrame(yo.get_chain_greeks_date(stock_ticker=ticker, expiration_date=date, option_type='c', dividend_yield=0.0, risk_free_rate=0.0))
-        self.puts = pd.DataFrame(yo.get_chain_greeks_date(stock_ticker=ticker, expiration_date=date, option_type='p', dividend_yield=0.0, risk_free_rate=0.0))
+        self.calls = pd.DataFrame(yo.get_chain_greeks_date(stock_ticker=ticker, expiration_date=date, option_type='c', dividend_yield=0.0, risk_free_rate=risk_free_rate))
+        self.puts = pd.DataFrame(yo.get_chain_greeks_date(stock_ticker=ticker, expiration_date=date, option_type='p', dividend_yield=0.0, risk_free_rate=risk_free_rate))
         self.stock_price = yo.get_underlying_price(self.calls['Symbol'][0])
         self.options = []
         self.depth = depth
@@ -44,30 +45,38 @@ class Strategy:
             profits = option.get_profit(stock_prices)
             combined_profit += profits
 
-        # Find the breakeven point
         breakeven_price = round(stock_prices[np.argmin(np.abs(combined_profit))], 3)
         breakeven_profit = 0
 
-        # Find the index of the breakeven_price in stock_prices
         breakeven_index = np.abs(stock_prices - breakeven_price).argmin()
 
-        # Create profit and loss regions for fill_between
         profit_region = combined_profit >= 0
         loss_region = combined_profit < 0
 
-        # Plot the combined profit graph
+        first_stdev_stock_prices = stock_prices[(stock_prices >= self.lower_price) & (stock_prices <= self.upper_price)]
+        first_stdev_combined_profit = combined_profit[(stock_prices >= self.lower_price) & (stock_prices <= self.upper_price)]
+
+        profit_integral = np.trapz(first_stdev_combined_profit[first_stdev_combined_profit >= 0], first_stdev_stock_prices[first_stdev_combined_profit >= 0])
+        loss_integral = np.trapz(first_stdev_combined_profit[first_stdev_combined_profit < 0], first_stdev_stock_prices[first_stdev_combined_profit < 0])
+
+        net_area = profit_integral + loss_integral
+
+        print(f"Profit region area: {profit_integral.round(2)}")
+        print(f"Loss region area: {loss_integral.round(2)}")
+
+        print(f"Net area: {net_area.round(2)}")
+
         plt.figure(figsize=(8, 6))
 
-        # Plot profit and loss regions as filled surfaces
         plt.fill_between(stock_prices, combined_profit, where=profit_region, color='green', alpha=0.5, label='Profit Region')
         plt.fill_between(stock_prices, combined_profit, where=loss_region, color='red', alpha=0.5, label='Loss Region')
 
-        plt.plot(stock_prices, combined_profit, label='Combined Profit')
+        plt.plot(stock_prices, combined_profit, label=f'Combined Profit')
+        plt.plot([self.lower_price, self.upper_price], [net_area, net_area], color='none', linestyle='--', lw=2, label=f'Expected Profit within 1 SD: {net_area.round(2)}')
         plt.axhline(y=0, color='gray', linestyle='--', lw=2)
         plt.axvline(x=self.upper_price, color='orange', linestyle='--', lw=2, label='Upper Price Range')
         plt.axvline(x=self.lower_price, color='orange', linestyle='--', lw=2, label='Lower Price Range')
 
-        # Plot the breakeven point on the combined profit line
         plt.scatter(x=breakeven_price, y=breakeven_profit, color='black', s=30, label=f'Breakeven Price: {breakeven_price}')
 
         for option in self.options:
@@ -84,9 +93,6 @@ class Strategy:
         plt.legend()
         plt.grid(True)
         plt.show()
-
-
-
 
 class Option:
     def __init__(self, option, direction, call_or_put):
@@ -112,35 +118,56 @@ class Option:
 
 def main():
     parser = argparse.ArgumentParser(description="Calculate and plot the combined profit/loss for options.")
-    parser.add_argument("date", help="Expiration date for the options (format: YYYY-MM-DD)")
     parser.add_argument("ticker", help="Stock ticker symbol")
+    parser.add_argument("--exp_dates", action='store_true', help="Flag to get expiration dates of the options")
+    parser.add_argument("date", nargs='?', default=None, help="Expiration date for the options (format: YYYY-MM-DD)")
     args = parser.parse_args()
 
-    date = args.date
     ticker = args.ticker
+
+    if args.exp_dates: # If expiration dates are specified
+        exp_dates = yo.get_expiration_dates(ticker)
+        print(f"Expiration dates for {ticker}:")
+        for date in exp_dates:
+            print((datetime.strptime(date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')) #Days are off by 1 for some reason
+        return
+    
+    date = args.date
 
     profit_calculator = Strategy(date=date, ticker=ticker, depth=1)
 
+    print(f"Current {ticker} price: {profit_calculator.stock_price}")
     while True:
-        command = input("Enter option command (- c or - p, and the strike price) e.g: \"- c 100\", or 'q' to quit: ")
-        if command == 'q':
+        command = input("Enter option command (<-|+><c|p> <strike_price>), or 'plot', 'reset', 'quit': ")
+        if command == 'plot':
+            profit_calculator.plot()
+            continue
+        if command == 'reset':
+            profit_calculator = Strategy(date=date, ticker=ticker, depth=1)
+            print("Selected options removed")
+            print(f"Current {ticker} price: {profit_calculator.stock_price}")
+            continue
+        if command == 'quit ':
             break
 
         try:
-            direction, option_type, strike_price = command.split()
+            option_type, strike_price = command.split()
             strike_price = float(strike_price)  # Convert to float
-            if option_type == "c":
-                option = Option(option=profit_calculator.calls[profit_calculator.calls['Strike'] == strike_price].iloc[0], direction=direction, call_or_put='c')
-            elif option_type == "p":
-                option = Option(option=profit_calculator.puts[profit_calculator.puts['Strike'] == strike_price].iloc[0], direction=direction, call_or_put='p')
+            #Call option
+            if option_type == "-c":
+                option = Option(option=profit_calculator.calls[profit_calculator.calls['Strike'] == strike_price].iloc[0], direction='-', call_or_put='c')
+            elif option_type == "+c":
+                option = Option(option=profit_calculator.calls[profit_calculator.calls['Strike'] == strike_price].iloc[0], direction='+', call_or_put='c')
+            #Put option
+            elif option_type == "-p":
+                option = Option(option=profit_calculator.puts[profit_calculator.puts['Strike'] == strike_price].iloc[0], direction='-', call_or_put='p')
+            elif option_type == "+p":
+                option = Option(option=profit_calculator.puts[profit_calculator.puts['Strike'] == strike_price].iloc[0], direction='+', call_or_put='p')
             else:
-                raise ValueError("Invalid option type. Use '- c' for call options or '- p' for put options.")
-
+                raise ValueError("Invalid option type. Use '-c' for call options, '-p' for put options, or 'plot', 'reset, 'quit")
             profit_calculator.add_option(option)
         except (ValueError, IndexError) as e:
-            print("Invalid command. Please try again.")
-
-    profit_calculator.plot()
+            print("Option not found, make sure the strike price is valid.")
 
 if __name__ == "__main__":
     main()
