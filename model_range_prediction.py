@@ -47,7 +47,7 @@ def predict_std_in_days(symbol, start_date, end_date, dte):
     
     # Use the last instance in features_test to represent the point dte days ahead
     prediction = model.predict(features_test[-1:])
-    print("Prediction:", prediction[0])  # Access the first element of the prediction array
+    print("Predicted price range within 1 stdev at expiration", prediction[0])  # Access the first element of the prediction array
 
     return prediction[0]
 
